@@ -12,9 +12,9 @@ A multi-tenant B2B order system. Each company (tenant) sees only its own data. O
 
 | What | URL |
 |---|---|
-| Web app (Render) | `PASTE_RENDER_URL_HERE` |
-| Invoice function (Vercel) | `PASTE_VERCEL_URL_HERE/api/invoice` |
-| GitHub repo | `PASTE_GITHUB_URL_HERE` |
+| Web app (Render) | https://saas-api-k5mi.onrender.com/ |
+| Invoice function (Vercel) | https://awt-lab-work-776omliac-maira20.vercel.app/api/invoice |
+| GitHub repo | https://github.com/Maira-Nasir180/awt-lab-work.git |
 
 Demo login (Tenant A, acme): `admin@acme.com` / `Password123!`
 
@@ -155,8 +155,7 @@ Result: about **290x faster** after adding the composite index.
 
 Both return the same order ids. Times are higher than local because the database is on Neon (network latency).
 
-### Smoke test: 18 passed, 0 failed
-![Smoke test](docs/screenshots/06-smoke-test.png)
+### Smoke test: 18 passed, 0 failed ![Smoke test](docs/screenshots/06-smoke-test.png)
 
 ---
 
@@ -169,35 +168,4 @@ Both return the same order ids. Times are higher than local because the database
 
 ---
 
-## Viva Cheat-Sheet
 
-**1. Show a live order**
-Open the app, log in as Tenant A, place an order. The API returns `202 Accepted` with status `PENDING`. The consumer later marks it `PROCESSED`.
-
-**2. Show the Kafka offset**
-In the consumer terminal point to `partition=... offset=...`. Explain: topic `tenant.orders` has 3 partitions, offset is the position of the message inside a partition.
-
-**3. Why is the Kafka key `tenant_id`?**
-Messages with the same key always go to the same partition. So all events of one tenant stay in one partition and keep their order. Kafka guarantees order only inside a partition.
-
-**4. Show the index effect**
-In `psql`, drop the index, run `EXPLAIN ANALYZE` (Parallel Seq Scan, about 43 ms), create the index again and run it again (Index Scan, about 0.15 ms).
-
-```sql
-DROP INDEX idx_orders_tenant_created;
--- run the EXPLAIN ANALYZE query
-CREATE INDEX idx_orders_tenant_created ON orders (tenant_id, created_at);
--- run the EXPLAIN ANALYZE query again
-```
-
-**5. How is tenant isolation done?**
-The tenant comes from the JWT, every query has `tenant_id`, and a mismatching tenant header returns `403`. Smoke tests prove tenant B cannot read or order from tenant A.
-
-**6. Why `202 Accepted`?**
-The work is done asynchronously. The API only confirms the order is accepted, so the user does not wait for stock and invoice processing.
-
-**7. N+1 problem**
-N+1 runs one query for the list plus one per order (51 queries). A JOIN with `json_agg` gets everything in one query.
-
-**8. Cold vs warm start**
-A serverless function that was idle needs extra time to start (cold). A recently used one answers faster (warm).
