@@ -2,28 +2,15 @@ services:
   - type: web
     name: saas-api
     runtime: node
+    plan: free
     buildCommand: npm install && npm run migrate && npm run seed
-    startCommand: npm start
+    startCommand: npm run consumer & npm start
     healthCheckPath: /health
     envVars:
       - { key: DATABASE_URL, sync: false }
       - { key: DB_SSL, value: "true" }
       - { key: JWT_SECRET, generateValue: true }
-      - { key: KAFKA_BROKERS, sync: false }
-      - { key: KAFKA_SSL, value: "true" }
-      - { key: KAFKA_SASL_MECHANISM, value: scram-sha-256 }
-      - { key: KAFKA_USERNAME, sync: false }
-      - { key: KAFKA_PASSWORD, sync: false }
-      - { key: KAFKA_TOPIC, value: tenant.orders }
-  - type: worker
-    name: saas-consumer
-    runtime: node
-    buildCommand: npm install
-    startCommand: npm run consumer
-    envVars:
-      - { key: DATABASE_URL, sync: false }
-      - { key: DB_SSL, value: "true" }
-      - { key: JWT_SECRET, sync: false }
+      - { key: KAFKA_DISABLED, value: "false" }
       - { key: KAFKA_BROKERS, sync: false }
       - { key: KAFKA_SSL, value: "true" }
       - { key: KAFKA_SASL_MECHANISM, value: scram-sha-256 }
