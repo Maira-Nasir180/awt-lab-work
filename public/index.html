@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Multi-Tenant SaaS - Orders</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#667;--bd:#dde1e6;--ac:#2f5bea}
+@media(prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mut:#9aa3ad;--bd:#2c323a;--ac:#6b8cff}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+main{max-width:960px;margin:0 auto;padding:20px}h1{font-size:20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:16px}
+input,select,button{font:inherit;padding:8px 10px;border-radius:7px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+button{background:var(--ac);color:#fff;border:0;cursor:pointer}button.sec{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);font-size:14px}
+.tag{padding:2px 8px;border-radius:99px;font-size:12px;background:var(--bd)}.PROCESSED{background:#1f9d55;color:#fff}.FAILED,.PUBLISH_FAILED{background:#d64545;color:#fff}.PENDING{background:#e0a100;color:#fff}
+pre{white-space:pre-wrap;font-size:12px;color:var(--mut);margin:6px 0 0}.wrap{overflow-x:auto}
+</style></head><body><main>
+<h1>Multi-Tenant B2B SaaS - Orders (Kafka + Postgres)</h1>
+<div class="card" id="loginCard">
+  <div class="row"><select id="tenant"><option value="acme">Tenant A - acme</option><option value="globex">Tenant B - globex</option></select>
+  <input id="email" value="admin@acme.com"><input id="pw" type="password" value="Password123!"><button id="loginBtn">Login</button></div>
+  <pre id="who">Not logged in</pre>
+</div>
+<div id="app" hidden>
+  <div class="card"><b>Place order</b> (returns 202, processed async via Kafka)
+    <div class="row"><input id="cust" placeholder="Customer name" value="Demo Customer"><select id="prod"></select><input id="qty" type="number" min="1" value="1" style="width:80px"><button id="orderBtn">Order</button></div>
+    <pre id="orderOut"></pre></div>
+  <div class="card"><div class="row"><b>Orders</b><button class="sec" id="fast">Load (JOIN, 1 query)</button><button class="sec" id="slow">Load (N+1)</button><button class="sec" id="refresh">Refresh</button></div>
+    <pre id="timing"></pre><div class="wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Total</th><th>Items</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+  <div class="card"><b>Products &amp; stock</b><div class="wrap"><table><tbody id="products"></tbody></table></div></div>
+</div></div>
+<script>
+let token=null,tenant='acme',mode='fast',poll=null;
+const $=(i)=>document.getElementById(i);
+const esc=(s)=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(m,p,b){const h={'content-type':'application/json','x-tenant-id':tenant};if(token)h.authorization='Bearer '+token;
+ const r=await fetch('/api/v1'+p,{method:m,headers:h,body:b?JSON.stringify(b):undefined});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j;}
+$('tenant').onchange=()=>{const t=$('tenant').value;$('email').value='admin@'+t+'.com';};
+$('loginBtn').onclick=async()=>{try{tenant=$('tenant').value;token=null;
+ const r=await api('POST','/auth/login',{email:$('email').value,password:$('pw').value});token=r.token;
+ $('who').textContent='Logged in as '+r.user.email+' | tenant: '+r.tenant.name+' ('+r.tenant.id+')';$('app').hidden=false;await load();}catch(e){$('who').textContent='Error: '+e.message;}};
+async function loadProducts(){const r=await api('GET','/products');$('products').innerHTML=r.data.map(p=>`<tr><td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>$${esc(p.price)}</td><td>stock: ${esc(p.stock)}</td></tr>`).join('');
+ $('prod').innerHTML=r.data.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');}
+async function loadOrders(){const r=await api('GET',mode==='slow'?'/orders/slow?limit=20':'/orders?limit=20');
+ $('timing').textContent=`${r.strategy} | ${r.queryCount} queries | ${r.durationMs.toFixed(1)} ms`;
+ $('rows').innerHTML=r.data.map(o=>`<tr><td>${esc(o.id.slice(0,8))}</td><td>${esc(o.customer_name)}</td><td><span class="tag ${esc(o.status)}">${esc(o.status)}</span></td><td>$${esc(o.total)}</td><td>${o.items.map(i=>esc(i.name)+' x'+i.quantity).join(', ')}</td></tr>`).join('');
+ return r.data;}
+async function load(){await loadProducts();await loadOrders();}
+$('fast').onclick=()=>{mode='fast';loadOrders();};$('slow').onclick=()=>{mode='slow';loadOrders();};$('refresh').onclick=load;
+$('orderBtn').onclick=async()=>{try{const r=await api('POST','/orders',{customerName:$('cust').value,items:[{productId:$('prod').value,quantity:parseInt($('qty').value,10)}]});
+ $('orderOut').textContent='202 Accepted: '+JSON.stringify(r,null,1);await loadOrders();
+ clearInterval(poll);let n=0;poll=setInterval(async()=>{n++;const d=await loadOrders().catch(()=>[]);const o=d.find(x=>x.id===r.orderId);
+  if((o&&o.status!=='PENDING')||n>15){clearInterval(poll);loadProducts();}},2000);}catch(e){$('orderOut').textContent='Error: '+e.message;}};
+</script></body></html>
